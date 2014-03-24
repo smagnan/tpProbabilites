@@ -10,8 +10,25 @@
 #define ARRAY_MAX_SIZE 1000
 #define OLDRAND_MAX 2147483647
 #define CALL_NBR 1024
+#define ARRAY_MAX_SIZE 1000
 
 static int next;
+
+struct file_attente
+{
+	double *arrivee;
+	int taille_arrivee;
+	double *depart;
+	int taille_depart;
+};
+typedef struct file_attente file_attente;
+
+struct evolution
+{
+	double *temps;
+	unsigned int *nombre;
+};
+typedef struct evolution evolution;
 
 int rdtsc()
 {
@@ -125,6 +142,140 @@ double Runs(int n,int nbBits, long * values)
 
 	//return erfc(s_obs/sqrt(2.0));
 }
+
+double Alea(u32 Kex[NB*NR], u32 Px[NB])
+{
+	double divide = 4294967296;
+	word32 output_AES;
+	output_AES = AES(Px, Kex); 	// AES
+	return (double)output_AES/divide;
+
+}
+
+double Exponentielle(double lambda,u32 Kex[NB*NR], u32 Px[NB]) 
+{
+	return -log(1-Alea(Kex,Px))/lambda;
+}
+
+file_attente FileMM1(double lambda, double mu, double D,u32 Kex[NB*NR], u32 Px[NB])
+{
+	file_attente resultats;
+	resultats.arrivee = (double *) calloc(ARRAY_MAX_SIZE,sizeof(double));
+	resultats.taille_arrivee = 0;
+	resultats.depart = (double *) calloc(ARRAY_MAX_SIZE,sizeof(double));
+	resultats.taille_depart = 0;
+	
+	double time = Exponentielle(lambda,Kex,Px);
+	resultats.arrivee[0] = time;
+	resultats.taille_arrivee++;
+	
+	while(time<=D)
+	{	
+		time = Exponentielle(lambda,Kex,Px) + resultats.arrivee[resultats.taille_arrivee-1];
+		if(time>D)
+		{
+			break;
+		}
+		resultats.arrivee[resultats.taille_arrivee] = Exponentielle(lambda,Kex,Px) + resultats.arrivee[resultats.taille_arrivee-1];
+		resultats.taille_arrivee++;	
+	}
+
+	resultats.depart[0] = resultats.arrivee[0]+ Exponentielle(mu,Kex,Px);
+	resultats.taille_depart++;
+	
+	int i;
+	for(i=1 ; i< resultats.taille_arrivee; i++)
+	{
+		if(resultats.arrivee[i] > resultats.depart[i-1])
+		{
+			resultats.depart[i] = resultats.arrivee[i]+ Exponentielle(mu,Kex,Px);
+		} 
+		else
+		{
+			resultats.depart[i] = resultats.depart[i-1] +Exponentielle(mu,Kex,Px);
+		}
+	}
+
+	resultats.taille_depart = resultats.taille_arrivee;
+
+	return resultats;
+}
+
+evolution evolClient(file_attente file)
+{
+	evolution resultats;
+	resultats.temps =  (double *) calloc(ARRAY_MAX_SIZE,sizeof(double));
+	resultats.nombre =  (unsigned int *) calloc(ARRAY_MAX_SIZE,sizeof(unsigned int));
+	
+	int a = 0; // arrivees
+	int d = 0; // departs
+	resultats.temps[0] = file.arrivee[0];
+	resultats.nombre[0]  = 1;
+	a++;
+	
+	while((a+d)<=2*file.taille_arrivee)
+	{
+
+		if(file.arrivee[a]<file.depart[d] && a<file.taille_arrivee)// si le client suivant arrive avant que le client précédent soit parti
+		{
+			resultats.temps[a+d] = file.arrivee[a];
+                        resultats.nombre[a+d] = resultats.nombre[a+d-1]+1;
+			a++;
+		}
+		else
+		{
+			resultats.temps[a+d] = file.depart[d];
+                        resultats.nombre[a+d] = resultats.nombre[a+d-1]-1;
+			d++;
+		}
+
+	}
+
+
+	//for(i = 0; i <file.taille_arrivee; i++)
+	//{
+	//	if(file.arrivee[i+1]<file.depart[i])  // si le client suivant arrive avant que le client précédent soit parti
+	//	{
+	//		resultats.temps[i+1] = file.arrivee[i+1];
+	//		resultats.nombre[i+1] = resultats.nombre[i]+1;
+	//	}
+	//	else
+	//	{
+	//		resultats.temps[i+1] = file.depart[i];
+        //                resultats.nombre[i+1] = resultats.nombre[i]-1;
+
+	//	}
+	//}
+
+	return resultats;
+}
+
+double nbClientMoyen(evolution evol,int nbValeurs)
+{
+	int i = 0;
+	double numerateur;
+	double denomin;
+	for(i = 1; i< nbValeurs;i++)
+	{
+		numerateur += (evol.temps[i]-evol.temps[i-1])*evol.nombre[i];
+		denomin += evol.temps[i]-evol.temps[i-1];
+	}
+
+	return numerateur/denomin;
+}
+
+double attenteMoyClient(file_attente file)
+{
+	int i = 0;
+	double sum;
+	for(i = 1; i< file.taille_arrivee;i++)
+        {
+		sum += file.depart[i]-file.arrivee[i];
+	}
+
+	return sum/file.taille_arrivee;
+} 
+
 int main()
 {
 	word16 x=1111; 			// nombre entre 1000 et 9999 pour Von Neumann
@@ -213,7 +364,25 @@ int main()
 
 	printf("Test Frequency: %f\n",Frequency(size,31,valuesRand));
 	printf("Test Runs: %f\n",Runs(size,31,valuesRand));
+	printf("Alea: %f\n",Alea(Px,Kex));
+	printf("Exponentielle: %f\n",Exponentielle(8.0,Px,Kex));
+	
+	file_attente f_a = FileMM1(0.2,0.33,180,Px,Kex);
+	evolution evol  = evolClient(f_a);
+	
+	for(i=0;i<f_a.taille_arrivee;i++)
+	{
+		printf("%f-%f\n",f_a.arrivee[i],f_a.depart[i]);
+	} 
 
+	for(i=0;i<2*f_a.taille_arrivee;i++)
+        {
+                printf("time: %f- val: %d\n",evol.temps[i],evol.nombre[i]);
+        }
+
+	printf("N_Moy: %f\n",nbClientMoyen(evol,2*f_a.taille_arrivee));
+	printf("Attente moy: %f\n",attenteMoyClient(f_a));
+	printf("lambda * attente moy =? N_Moy: %f\n",attenteMoyClient(f_a)*0.2);//TODO: mettre 0.2 dans une variable lambda
 	free(valuesRand);
 
 	return 0;
