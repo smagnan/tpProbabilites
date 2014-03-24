@@ -211,7 +211,9 @@ int main()
 		valuesRand[k] = AES(Px,Kex);
 	}
 
-	printf("%f\n",Frequency(size,31,valuesRand));
+	printf("Test Frequency: %f\n",Frequency(size,31,valuesRand));
+	printf("Test Runs: %f\n",Runs(size,31,valuesRand));
+
 	free(valuesRand);
 
 	return 0;
